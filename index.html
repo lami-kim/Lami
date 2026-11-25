@@ -45,6 +45,10 @@
   .bar > div { height: 100%; width: 0; background: currentColor; transition: width .2s linear; }
   .ready { color: var(--ready); } .work { color: var(--work); }
   .rest { color: var(--rest); } .done { color: var(--done); }
+  .notice { min-height: 2.2em; margin-top: 14px; font-size: 1.35rem; font-weight: 700; }
+  .notice.pop { animation: pop .5s ease-out; }
+  @keyframes pop { from { transform: scale(1.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .notice.pop { animation: none; } }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -63,6 +67,7 @@
     <div class="phase" id="phase"></div>
     <div class="time" id="time">0</div>
     <div class="round" id="round"></div>
+    <div class="notice" id="notice" aria-live="assertive"></div>
     <div class="bar" id="barWrap"><div id="bar"></div></div>
     <div class="btns">
       <button id="pause">일시정지</button>
@@ -112,6 +117,23 @@ function beep(freq = 880, dur = 0.15) {
   } catch (e) {}
 }
 
+// ---- 음성 안내 ----
+function speak(text) {
+  try {
+    if (!window.speechSynthesis) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ko-KR'; u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+function announce(text, say = text) {
+  const n = $('notice');
+  n.textContent = text;
+  n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop');
+  speak(say);
+}
+
 // ---- 타이머 ----
 let phases = [], idx = 0, endAt = 0, remainingMs = 0, ticker = null, paused = false, lastSec = null;
 
@@ -134,8 +156,9 @@ function enterPhase(i) {
   $('round').textContent = p.type === 'ready'
     ? `총 ${phases.filter(x => x.type === 'work').length}회`
     : `${p.round} / ${phases.filter(x => x.type === 'work').length} 회`;
-  if (p.type === 'work') beep(1200, 0.4);
-  if (p.type === 'rest') beep(600, 0.4);
+  if (p.type === 'ready') announce(`${PREP}초 후 시작합니다`);
+  if (p.type === 'work') { beep(1200, 0.4); announce(`시작 ${p.round}`); }
+  if (p.type === 'rest') { beep(600, 0.4); announce(`${p.round}회 완료 · 휴식`, `${p.round}회 완료. 휴식`); }
   render();
 }
 
@@ -164,12 +187,15 @@ function finish() {
   $('bar').style.width = '100%';
   $('pause').hidden = true;
   beep(1200, 0.2); setTimeout(() => beep(1500, 0.5), 250);
+  const total = phases.filter(x => x.type === 'work').length;
+  announce(`${total}회 모두 완료`, `${total}회 모두 완료. 수고하셨습니다`);
 }
 
 $('start').addEventListener('click', () => {
   const s = readSettings();
   try { localStorage.setItem('interval-settings', JSON.stringify(s)); } catch (e) {}
   beep(440, 0.01); // 모바일에서 오디오 잠금 해제
+  speak(''); // 모바일에서 음성 안내 잠금 해제
   phases = buildPhases(s);
   paused = false;
   $('pause').textContent = '일시정지'; $('pause').hidden = false;
@@ -193,6 +219,7 @@ $('pause').addEventListener('click', () => {
 
 $('stop').addEventListener('click', () => {
   clearInterval(ticker); ticker = null;
+  try { speechSynthesis.cancel(); } catch (e) {}
   $('run').hidden = true; $('setup').hidden = false;
 });
 </script>
