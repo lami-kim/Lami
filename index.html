@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>인터벌 타이머</title>
+<style>
+  :root {
+    --bg: #f5f5f4; --card: #ffffff; --text: #1c1917; --muted: #78716c; --line: #e7e5e4;
+    --ready: #d97706; --work: #dc2626; --rest: #16a34a; --done: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0c0a09; --card: #1c1917; --text: #f5f5f4; --muted: #a8a29e; --line: #292524; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .card {
+    width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 20px; padding: 24px;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 20px; }
+  label { display: flex; justify-content: space-between; align-items: center; padding: 12px 0;
+          border-bottom: 1px solid var(--line); font-size: 1rem; }
+  label span small { color: var(--muted); margin-left: 4px; }
+  input[type=number] {
+    width: 96px; padding: 8px 10px; font-size: 1.1rem; text-align: right; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  .summary { color: var(--muted); font-size: .9rem; margin: 14px 0 0; }
+  .btns { display: flex; gap: 10px; margin-top: 20px; }
+  button {
+    flex: 1; padding: 14px; font-size: 1.05rem; font-weight: 600; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer;
+  }
+  button.primary { background: var(--text); color: var(--card); border-color: var(--text); }
+  .timer { text-align: center; }
+  .phase { font-size: 1.6rem; font-weight: 700; margin-top: 4px; }
+  .time { font-size: 6rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 8px 0; }
+  .round { color: var(--muted); font-size: 1rem; }
+  .bar { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; margin-top: 18px; }
+  .bar > div { height: 100%; width: 0; background: currentColor; transition: width .2s linear; }
+  .ready { color: var(--ready); } .work { color: var(--work); }
+  .rest { color: var(--rest); } .done { color: var(--done); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main class="card">
+  <section id="setup">
+    <h1>인터벌 트레이닝 타이머</h1>
+    <label><span>운동 시간<small>(초)</small></span><input id="work" type="number" min="1" value="30"></label>
+    <label><span>휴식 시간<small>(초)</small></span><input id="rest" type="number" min="0" value="15"></label>
+    <label><span>반복 횟수<small>(회)</small></span><input id="rounds" type="number" min="1" value="8"></label>
+    <p class="summary" id="summary"></p>
+    <div class="btns"><button class="primary" id="start">시작</button></div>
+  </section>
+
+  <section id="run" class="timer" hidden>
+    <div class="phase" id="phase"></div>
+    <div class="time" id="time">0</div>
+    <div class="round" id="round"></div>
+    <div class="bar" id="barWrap"><div id="bar"></div></div>
+    <div class="btns">
+      <button id="pause">일시정지</button>
+      <button id="stop">처음으로</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const PREP = 10; // 시작 전 준비 시간(초)
+const $ = id => document.getElementById(id);
+const inputs = { work: $('work'), rest: $('rest'), rounds: $('rounds') };
+
+// ---- 설정 ----
+function readSettings() {
+  const work = Math.max(1, parseInt(inputs.work.value) || 0);
+  const rest = Math.max(0, parseInt(inputs.rest.value) || 0);
+  const rounds = Math.max(1, parseInt(inputs.rounds.value) || 0);
+  return { work, rest, rounds };
+}
+function fmt(sec) {
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m ? `${m}:${String(s).padStart(2, '0')}` : String(s);
+}
+function updateSummary() {
+  const { work, rest, rounds } = readSettings();
+  const total = PREP + work * rounds + rest * (rounds - 1);
+  $('summary').textContent = `준비 ${PREP}초 후 시작 · 총 ${fmt(total)}${total >= 60 ? '' : '초'}`;
+}
+Object.values(inputs).forEach(el => el.addEventListener('input', updateSummary));
+try {
+  const saved = JSON.parse(localStorage.getItem('interval-settings') || 'null');
+  if (saved) for (const k in inputs) if (saved[k] != null) inputs[k].value = saved[k];
+} catch (e) {}
+updateSummary();
+
+// ---- 소리 ----
+let audio;
+function beep(freq = 880, dur = 0.15) {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = freq; o.connect(g); g.connect(audio.destination);
+    const t = audio.currentTime;
+    g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.start(t); o.stop(t + dur);
+  } catch (e) {}
+}
+
+// ---- 타이머 ----
+let phases = [], idx = 0, endAt = 0, remainingMs = 0, ticker = null, paused = false, lastSec = null;
+
+function buildPhases({ work, rest, rounds }) {
+  const list = [{ type: 'ready', label: '준비', dur: PREP, round: 0 }];
+  for (let r = 1; r <= rounds; r++) {
+    list.push({ type: 'work', label: '운동', dur: work, round: r });
+    if (rest > 0 && r < rounds) list.push({ type: 'rest', label: '휴식', dur: rest, round: r });
+  }
+  return list;
+}
+
+function enterPhase(i) {
+  idx = i;
+  const p = phases[idx];
+  endAt = Date.now() + p.dur * 1000;
+  lastSec = null;
+  $('run').className = 'timer ' + p.type;
+  $('phase').textContent = p.label;
+  $('round').textContent = p.type === 'ready'
+    ? `총 ${phases.filter(x => x.type === 'work').length}회`
+    : `${p.round} / ${phases.filter(x => x.type === 'work').length} 회`;
+  if (p.type === 'work') beep(1200, 0.4);
+  if (p.type === 'rest') beep(600, 0.4);
+  render();
+}
+
+function render() {
+  const p = phases[idx];
+  const left = Math.max(0, endAt - Date.now());
+  const sec = Math.ceil(left / 1000);
+  $('time').textContent = fmt(sec);
+  $('bar').style.width = (100 * (1 - left / (p.dur * 1000))) + '%';
+  if (sec !== lastSec) {
+    if (sec > 0 && sec <= 3) beep(880, 0.12); // 마지막 3초 카운트다운
+    lastSec = sec;
+  }
+  if (left <= 0) {
+    if (idx + 1 < phases.length) enterPhase(idx + 1);
+    else finish();
+  }
+}
+
+function finish() {
+  clearInterval(ticker); ticker = null;
+  $('run').className = 'timer done';
+  $('phase').textContent = '완료!';
+  $('time').textContent = '🎉';
+  $('round').textContent = '수고하셨습니다';
+  $('bar').style.width = '100%';
+  $('pause').hidden = true;
+  beep(1200, 0.2); setTimeout(() => beep(1500, 0.5), 250);
+}
+
+$('start').addEventListener('click', () => {
+  const s = readSettings();
+  try { localStorage.setItem('interval-settings', JSON.stringify(s)); } catch (e) {}
+  beep(440, 0.01); // 모바일에서 오디오 잠금 해제
+  phases = buildPhases(s);
+  paused = false;
+  $('pause').textContent = '일시정지'; $('pause').hidden = false;
+  $('setup').hidden = true; $('run').hidden = false;
+  enterPhase(0);
+  ticker = setInterval(render, 100);
+});
+
+$('pause').addEventListener('click', () => {
+  if (!paused) {
+    remainingMs = endAt - Date.now();
+    clearInterval(ticker); ticker = null;
+    $('pause').textContent = '계속';
+  } else {
+    endAt = Date.now() + remainingMs;
+    ticker = setInterval(render, 100);
+    $('pause').textContent = '일시정지';
+  }
+  paused = !paused;
+});
+
+$('stop').addEventListener('click', () => {
+  clearInterval(ticker); ticker = null;
+  $('run').hidden = true; $('setup').hidden = false;
+});
+</script>
+</body>
+</html>
